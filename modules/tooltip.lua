@@ -124,6 +124,8 @@ module.defaults = {
 -- ##### Revert Functions #############################################################################################
 -- ####################################################################################################################
 
+-- luacheck: globals GameTooltipStatusBar
+
 function module:RevertTooltipBackdrop()
 	for i = 1, #TOOLTIPS_LIST do
 		local tooltipName = TOOLTIPS_LIST[i]
@@ -154,21 +156,20 @@ local function GetTooltipUnit(frame)
 	local _, unit = frame:GetUnit()
 	-- If GetUnit fails, look for a mouseover target.
 	if not unit and UnitExists("mouseover") then
-		unit = "mouseover"
+		return "mouseover"
 	end
 	return unit
 end
 
--- Debug function, this will call UpdateTooltipBackdrop, optionally add a tooltip before doing so.
-function LUI:ForceTooltipUpdate(ttip)
-	if ttip then
-		tinsert(TOOLTIPS_LIST, ttip)
-	end
-	module:UpdateTooltipBackdrop()
-end
-
 function module:UpdateTooltipBackdrop()
 	local db = module:GetDB("Textures")
+	module.tooltipBackdrop = {
+		bgFile = Media:Fetch("background", db.backgroundTex),
+		edgeFile = Media:Fetch("border", db.borderTex),
+		edgeSize = db.borderSize, tile = false,
+		insets = {left = 0, right = 0, top = 0, bottom = 0, }
+	}
+
 	for i = 1, #TOOLTIPS_LIST do
 		local tooltipName = TOOLTIPS_LIST[i]
 		local tooltip = _G[tooltipName]
@@ -180,12 +181,7 @@ function module:UpdateTooltipBackdrop()
 				oldDefault[tooltipName] = tooltip:GetBackdrop()
 				initialScale[tooltipName] = tooltip:GetScale()
 			end
-			tooltip:SetBackdrop({
-				bgFile = Media:Fetch("background", db.backgroundTex),
-				edgeFile = Media:Fetch("border", db.borderTex),
-				edgeSize = db.borderSize, tile = false,
-				insets = {left = 0, right = 0, top = 0, bottom = 0, }
-			})
+			tooltip:SetBackdrop(module.tooltipBackdrop)
 			if not module:IsHooked(tooltip, "OnShow") then
 				module:HookScript(tooltip, "OnShow", "OnTooltipShow")
 			end
@@ -193,6 +189,14 @@ function module:UpdateTooltipBackdrop()
 			--module:Mod(tooltipName.." Not Found")
 		end
 	end
+end
+
+-- Debug function, this will call UpdateTooltipBackdrop, optionally add a tooltip before doing so.
+function LUI:ForceTooltipUpdate(ttip)
+	if ttip then
+		tinsert(TOOLTIPS_LIST, ttip)
+	end
+	module:UpdateTooltipBackdrop()
 end
 
 function module:GetUnitColor(unit)
@@ -259,6 +263,7 @@ end
 function module:SetBorderColor(frame)
 	local unit = GetTooltipUnit(frame)
 	local health = GameTooltipStatusBar
+	local itemLink = (not unit and frame.GetItem) and select(2, frame:GetItem())
 
 	frame:SetBackdropColor(module:RGB("Background"))
 	frame:SetBackdropBorderColor(module:RGB("Border"))
@@ -278,8 +283,7 @@ function module:SetBorderColor(frame)
 		health:SetStatusBarColor(r, g, b)
 
 	-- Tooltip is an item
-	elseif not unit and frame.GetItem and frame:GetItem() then
-		local _, itemLink = frame:GetItem()
+	elseif itemLink then
 		local _, _, quality = GetItemInfo(itemLink)
 		-- Only need to change border color for Uncommon and above.
 		if quality and quality >= 2 then
@@ -327,32 +331,31 @@ end
 function module:OnTooltipShow(frame)
 	local db = module:GetDB()
 	if db.hideCombat and InCombatLockdown() then
-		frame:Hide()
-		return
+		return frame:Hide()
 	end
 
-	--If a frame as a smaller scale than normal for any reasons, make sure that's respected.
+	--If a frame has a smaller scale than normal for any reasons, make sure that's respected.
 	frame:SetScale(initialScale[frame:GetName()] * db.Scale)
+	frame:SetBackdrop(module.tooltipBackdrop)
 	module:SetBorderColor(frame)
 end
+module:SecureHook("GameTooltip_UpdateStyle", function(frame)
+	module:OnTooltipShow(frame)
+end)
 
+-- luacheck: globals GameTooltipTextLeft1 GameTooltipTextLeft2
 function module:OnGameTooltipSetUnit(frame)
 	local db = module:GetDB()
 	if db.hideCombatUnit and InCombatLockdown() then
-		frame:Hide()
-		return
+		return frame:Hide()
 	end
 
 	local unit = GetTooltipUnit(frame)
-	-- If that fails, report it so we can investigate.
-	if not unit then
-		return
-	end
+	if not unit then return frame:Hide() end
 
 	-- Hide tooltip on unitframes if that option is enabled
 	if frame:GetOwner() ~= UIParent and db.hideUF then
-		frame:Hide()
-		return
+		return frame:Hide()
 	end
 
 	local sex = UnitSex(unit)
@@ -444,6 +447,7 @@ end
 
 module.enableButton = true
 
+-- luacheck: push ignore
 function module:LoadOptions()
 
 	local function disableIfTooltipsHidden(info_)
@@ -455,10 +459,8 @@ function module:LoadOptions()
 		Header = module:NewHeader(L["Tooltip_Name"], 1),
 		General = module:NewRootGroup(L["Settings"], 2, nil, nil, {
 			hideCombat = module:NewToggle(L["Tooltip_HideCombat_Name"], L["Tooltip_HideCombat_Desc"], 1),
-			hideCombatSkills = module:NewToggle(L["Tooltip_HideCombatSkills_Name"],
-			                                    L["Tooltip_HideCombatSkills_Desc"], 2, nil, nil, disableIfTooltipsHidden),
-			hideCombatUnit = module:NewToggle(L["Tooltip_HideCombatUnit_Name"],
-			                                  L["Tooltip_HideCombatUnit_Desc"], 2, nil, nil, disableIfTooltipsHidden),
+			hideCombatSkills = module:NewToggle(L["Tooltip_HideCombatSkills_Name"], L["Tooltip_HideCombatSkills_Desc"], 2, nil, nil, disableIfTooltipsHidden),
+			hideCombatUnit = module:NewToggle(L["Tooltip_HideCombatUnit_Name"], L["Tooltip_HideCombatUnit_Desc"], 2, nil, nil, disableIfTooltipsHidden),
 			hideUF = module:NewToggle(L["Tooltip_HideUF_Name"], L["Tooltip_HideUF_Desc"], 3),
 			hidePVP = module:NewToggle(L["Tooltip_HidePVP_Name"], L["Tooltip_HidePVP_Desc"], 4),
 			showSex = module:NewToggle(L["Tooltip_ShowSex_Name"], L["Tooltip_ShowSex_Desc"], 5),
@@ -471,15 +473,12 @@ function module:LoadOptions()
 		}),
 		Textures = module:NewGroup(L["Textures"], 3, nil, nil, {
 			Background = module:NewHeader(L["Background"], 1),
-			backgroundTex = module:NewTexBackground(L["Tooltip_BackgroundTex_Name"],
-			                                        L["BackgroundDesc"], 2, "UpdateTooltipBackdrop", "double"),
+			backgroundTex = module:NewTexBackground(L["Tooltip_BackgroundTex_Name"], L["BackgroundDesc"], 2, "UpdateTooltipBackdrop", "double"),
 			Health = module:NewHeader(L["Health Bar"], 3),
-			healthBar = module:NewTexStatusBar(L["Tooltip_HealthBar_Name"],
-			                                   L["Tooltip_HealthBar_Desc"], 4, "SetStatusHealthBar", "double"),
+			healthBar = module:NewTexStatusBar(L["Tooltip_HealthBar_Name"], L["Tooltip_HealthBar_Desc"], 4, "SetStatusHealthBar", "double"),
 			Border = module:NewHeader(L["Border"], 5),
 			borderTex = module:NewTexBorder(L["Tooltip_BorderTex_Name"], L["BorderDesc"], 6, "UpdateTooltipBackdrop", "double"),
-			borderSize = module:NewSlider(L["Tooltip_BorderSize_Name"],
-			                              L["Tooltip_BorderSize_Desc"], 7, 1, 30, 1, nil, "UpdateTooltipBackdrop", "double"),
+			borderSize = module:NewSlider(L["Tooltip_BorderSize_Name"], L["Tooltip_BorderSize_Desc"], 7, 1, 30, 1, nil, "UpdateTooltipBackdrop", "double"),
 		}),
 		Colors = module:NewGroup(L["Colors"], 3, nil, nil, {
 			Guild = module:NewColor(GUILD, 1),
@@ -493,6 +492,7 @@ function module:LoadOptions()
 	}
 	return options
 end
+-- luacheck: pop
 
 -- ####################################################################################################################
 -- ##### Framework Events #############################################################################################
